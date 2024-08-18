@@ -65,7 +65,6 @@ class General_HyperlatticeQ(object):
         time_1 = time.time()
         self.sumLam = sum(self.Lam.values())                                    # sum of arrival rates of the entire service system
         time_2 = time.time()
-#         self.aggLam = self._aggregated_arrival_rates(inf + 1)                 # aggregated arrival rates (bar_Lam_k) index mathematically start from 0 
         self.aggLam = np.array([math.comb(k+I-1, k) * self.sumLam for k in range(inf + 1)])  
         time_3 = time.time()
         self.aggLam_formula = np.array([math.comb(k+I-1, k) * self.sumLam for k in range(inf + 1)])  
@@ -416,6 +415,8 @@ class allocation(object):
         self.K = K
         self.inf = inf
         self.T = None
+        self.lat_dict = {}
+        self.idx_dict = {}
 
     def T_mat_2_dict(self, T_matrix, regions):
         T = {}
@@ -456,6 +457,23 @@ class allocation(object):
         mrt_region = self.perf.t_region
         return mrt, mrt_server, mrt_region
     
+
+    def mean_travel_time_real_case(self, eta_matrix, T):
+        self.eta_matrix = eta_matrix
+        self.lambda_dict = self._get_lambda_dict()
+        self.eta_dict = self._get_eta_dict()
+        self.check_feasibility()
+        self.T = self._get_T_dict(T)
+        
+        self.hq = General_HyperlatticeQ(I=self.I, Lam=self.lambda_dict, Eta=self.eta_dict, 
+                                        mu=self.mu, K=self.K, inf=self.inf)
+        self.perf = General_HLQperformance(self.hq, self.T)
+        mrt = self.perf.t
+        mrt_server = self.perf.t_server
+        mrt_region = self.perf.t_region
+        return mrt, mrt_server, mrt_region
+
+    
     def check_feasibility(self):
         """
         Check feasibility for the current solution
@@ -491,6 +509,11 @@ class allocation(object):
                 lambda_dict[tuple(server_list)] = self.lambda_list[cur_region_index]
             else:
                 lambda_dict[tuple(server_list)] += self.lambda_list[cur_region_index]
+
+            self.lat_dict[tuple(server_list)] = cur_region_index
+            if len(server_list) == 1:
+                self.idx_dict[server_list[0]] = cur_region_index
+
         return lambda_dict
     
     def _get_eta_dict(self):
@@ -514,6 +537,30 @@ class allocation(object):
                 eta_dict[tuple(server_list)] = (1-ratio)*eta_dict[tuple(server_list)] + ratio*self.eta_matrix[cur_region_index]
                 assert sum(eta_dict[tuple(server_list)]) - 1 < 1e-5
         return eta_dict
+    
+    def _get_T_dict(self, T_matrix):
+        """
+        Convert the eta matrix to the input format of the hyperlattice
+        """
+        T_dict = {}
+        cur_lambda_dict = {}
+        for cur_region_index in range(self.N):
+            cur_region = self.eta_matrix[cur_region_index]
+            server_list = []
+            for cur_server_index in range(self.I):
+                if cur_region[cur_server_index] > 0:
+                    server_list.append(cur_server_index)
+                    
+            if tuple(server_list) not in T_dict:
+                cur_T_dict = {}
+                for i in server_list:
+                    cur_T_dict[i] = T_matrix[i][cur_region_index]
+                T_dict[tuple(server_list)] = cur_T_dict
+                cur_lambda_dict[tuple(server_list)] = self.lambda_list[cur_region_index]
+            else:
+                ratio = self.lambda_list[cur_region_index]/(self.lambda_list[cur_region_index] + cur_lambda_dict[tuple(server_list)])
+                T_dict[tuple(server_list)] = {i: (1-ratio)*T_dict[tuple(server_list)][i] + ratio*T_matrix[cur_region_index][i] for i in server_list}
+        return T_dict
     
 
 ### Simulation ###
